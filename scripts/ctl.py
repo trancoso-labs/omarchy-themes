@@ -31,11 +31,24 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 FAMILY_PREFIX = "aether-"
 
+DEFAULT_SCENE = {
+    "map_active": False,
+    "chroma_active": False,
+    "density": 0.5,
+    "key": 0.5,
+    "chroma": 0.5,
+    "radius": 0.32,
+}
+
 DEFAULT_CONFIG = {
     "enabled": False,
     "interval_minutes": 15,
+    "scene": json.loads(json.dumps(DEFAULT_SCENE)),
     "themes": {},
 }
+
+DENSITY_CALM_MAX = 0.40
+DENSITY_PACKED_MIN = 0.70
 
 
 def dump(obj) -> None:
@@ -66,6 +79,22 @@ def load_config() -> dict:
     except (TypeError, ValueError):
         out["interval_minutes"] = 15
     out["enabled"] = bool(out.get("enabled"))
+    scene = json.loads(json.dumps(DEFAULT_SCENE))
+    raw_scene = data.get("scene")
+    if isinstance(raw_scene, dict):
+        scene.update({k: raw_scene[k] for k in DEFAULT_SCENE if k in raw_scene})
+        if "map_active" not in raw_scene and raw_scene.get("active"):
+            scene["map_active"] = True
+            scene["chroma_active"] = True
+    scene["map_active"] = bool(scene.get("map_active"))
+    scene["chroma_active"] = bool(scene.get("chroma_active"))
+    try:
+        scene["radius"] = max(0.08, min(1.0, float(scene.get("radius") or 0.32)))
+        for axis in ("density", "key", "chroma"):
+            scene[axis] = max(0.0, min(1.0, float(scene.get(axis) or 0.5)))
+    except (TypeError, ValueError):
+        scene = json.loads(json.dumps(DEFAULT_SCENE))
+    out["scene"] = scene
     return out
 
 
@@ -110,6 +139,146 @@ def parse_accent(colors_path: Path) -> str:
             if match:
                 return match.group(0)
     return "#888888"
+
+
+def density_label(score: float) -> str:
+    if score < DENSITY_CALM_MAX:
+        return "calm"
+    if score >= DENSITY_PACKED_MIN:
+        return "packed"
+    return "mid"
+
+
+def key_label(score: float) -> str:
+    if score < 0.35:
+        return "dark"
+    if score >= 0.65:
+        return "light"
+    return "dusk"
+
+
+def chroma_label(score: float) -> str:
+    if score < 0.22:
+        return "mute"
+    if score >= 0.45:
+        return "vivid"
+    return "tint"
+
+
+def scene_score(path: Path) -> dict:
+    """Three 0–1 axes from the same thumbnail.
+
+    density: 8×8 occupancy of edges (calm → packed)
+    key: mean luma (dark → light)
+    chroma: mean HSV saturation (mute → vivid)
+    """
+    from PIL import Image, ImageFilter
+
+    empty = {
+        "density": 0.0,
+        "occupancy": 0.0,
+        "key": 0.0,
+        "chroma": 0.0,
+        "density_label": "calm",
+        "key_label": "dark",
+        "chroma_label": "mute",
+        "label": "calm",
+    }
+    try:
+        rgb = Image.open(path).convert("RGB")
+    except OSError:
+        return empty
+    rgb.thumbnail((320, 320), Image.Resampling.LANCZOS)
+    gray = rgb.convert("L")
+    grid = gray.filter(ImageFilter.FIND_EDGES).resize((8, 8), Image.Resampling.BOX)
+    cells = [p / 255.0 for p in grid.getdata()]
+    occupancy = sum(1 for v in cells if v >= 0.04) / max(len(cells), 1)
+    edge_mean = sum(cells) / max(len(cells), 1)
+    density = max(0.0, min(1.0, 0.7 * occupancy + 0.3 * min(edge_mean * 8.0, 1.0)))
+    luma = list(gray.getdata())
+    key = (sum(luma) / max(len(luma), 1)) / 255.0
+    sats = [p[1] for p in rgb.convert("HSV").getdata()]
+    chroma = (sum(sats) / max(len(sats), 1)) / 255.0
+    return {
+        "density": round(density, 3),
+        "occupancy": round(occupancy, 3),
+        "key": round(key, 3),
+        "chroma": round(chroma, 3),
+        "density_label": density_label(density),
+        "key_label": key_label(key),
+        "chroma_label": chroma_label(chroma),
+        "label": density_label(density),
+    }
+
+
+def density_cache_load() -> dict:
+    path = STATE / "density.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def density_cache_save(cache: dict) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / "density.json.tmp"
+    tmp.write_text(json.dumps(cache) + "\n")
+    tmp.replace(STATE / "density.json")
+
+
+def density_for(path: Path, cache: dict | None = None) -> dict:
+    try:
+        st = path.stat()
+        key = f"{path}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return {
+            "density": 0.0,
+            "occupancy": 0.0,
+            "key": 0.0,
+            "chroma": 0.0,
+            "density_label": "calm",
+            "key_label": "dark",
+            "chroma_label": "mute",
+            "label": "calm",
+        }
+    store = cache if cache is not None else density_cache_load()
+    hit = store.get(key)
+    if isinstance(hit, dict) and "density" in hit and "key" in hit and "chroma" in hit:
+        return hit
+    scored = scene_score(path)
+    store[key] = scored
+    if cache is None:
+        density_cache_save(store)
+    return scored
+
+
+def scene_radius(scene: dict) -> float:
+    try:
+        return max(0.08, min(1.0, float(scene.get("radius") or 0.32)))
+    except (TypeError, ValueError):
+        return 0.32
+
+
+def in_chroma(axes: dict, scene: dict) -> bool:
+    if not scene.get("chroma_active"):
+        return True
+    dc = float(axes.get("chroma") or 0) - float(scene.get("chroma") or 0.5)
+    return abs(dc) <= scene_radius(scene)
+
+
+def in_map(axes: dict, scene: dict) -> bool:
+    if not scene.get("map_active"):
+        return True
+    dd = float(axes.get("density") or 0) - float(scene.get("density") or 0.5)
+    dk = float(axes.get("key") or 0) - float(scene.get("key") or 0.5)
+    return (dd * dd + dk * dk) ** 0.5 <= scene_radius(scene)
+
+
+def scene_matches(axes: dict, scene: dict) -> bool:
+    return in_chroma(axes, scene) and in_map(axes, scene)
 
 
 def parse_palette(colors_path: Path) -> list[tuple[int, int, int]]:
@@ -176,12 +345,34 @@ def status() -> dict:
     cfg = load_config()
     current = current_theme()
     current_bg = current_background_name()
+    cache = density_cache_load()
     themes = []
     for slug in list_user_themes():
         files = background_files(slug)
         names = [p.name for p in files]
         enabled = enabled_names(cfg, slug, names)
         directory = theme_dir(slug)
+        backgrounds = []
+        for path in files:
+            dens = density_for(path, cache)
+            backgrounds.append(
+                {
+                    "file": path.name,
+                    "label": label_for(path.name),
+                    "enabled": path.name in enabled,
+                    "active": slug == current and path.name == current_bg,
+                    "path": str(path),
+                    "density": dens["density"],
+                    "key": dens.get("key", 0),
+                    "chroma": dens.get("chroma", 0),
+                    "density_label": dens.get("density_label") or dens.get("label") or "mid",
+                    "key_label": dens.get("key_label") or "dusk",
+                    "chroma_label": dens.get("chroma_label") or "tint",
+                    "in_chroma": in_chroma(dens, cfg.get("scene") or DEFAULT_SCENE),
+                    "in_map": in_map(dens, cfg.get("scene") or DEFAULT_SCENE),
+                    "in_scene": scene_matches(dens, cfg.get("scene") or DEFAULT_SCENE),
+                }
+            )
         themes.append(
             {
                 "id": slug,
@@ -191,18 +382,10 @@ def status() -> dict:
                 if (directory / "preview.jpg").is_file()
                 else (str(files[0]) if files else ""),
                 "current": slug == current,
-                "backgrounds": [
-                    {
-                        "file": path.name,
-                        "label": label_for(path.name),
-                        "enabled": path.name in enabled,
-                        "active": slug == current and path.name == current_bg,
-                        "path": str(path),
-                    }
-                    for path in files
-                ],
+                "backgrounds": backgrounds,
             }
         )
+    density_cache_save(cache)
     sync_state = {}
     sync_file = STATE / "sync.json"
     if sync_file.is_file():
@@ -218,6 +401,7 @@ def status() -> dict:
         "timer": {
             "enabled": bool(cfg.get("enabled")),
             "interval_minutes": int(cfg.get("interval_minutes") or 15),
+            "scene": cfg.get("scene") or json.loads(json.dumps(DEFAULT_SCENE)),
         },
         "sync": {
             "message": sync_state.get("message", ""),
@@ -332,6 +516,61 @@ def set_timer(enabled: bool | None = None, minutes: int | None = None) -> dict:
     return out
 
 
+def set_scene(*args: str) -> dict:
+    cfg = load_config()
+    scene = cfg.setdefault("scene", json.loads(json.dumps(DEFAULT_SCENE)))
+    if not args or args[0] in ("off", "reset", "all"):
+        scene["map_active"] = False
+        scene["chroma_active"] = False
+        save_config(cfg)
+        out = status()
+        out["message"] = "Cena livre"
+        return out
+    kind = args[0]
+    try:
+        if kind == "map" and len(args) >= 2 and args[1] in ("off", "reset"):
+            scene["map_active"] = False
+            save_config(cfg)
+            out = status()
+            out["message"] = "Mapa livre"
+            return out
+        if kind == "chroma" and len(args) >= 2 and args[1] in ("off", "reset"):
+            scene["chroma_active"] = False
+            save_config(cfg)
+            out = status()
+            out["message"] = "Chroma livre"
+            return out
+        if kind == "map" and len(args) >= 3:
+            scene["density"] = max(0.0, min(1.0, float(args[1])))
+            scene["key"] = max(0.0, min(1.0, float(args[2])))
+            scene["map_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = f"{density_label(scene['density'])} · {key_label(scene['key'])}"
+            return out
+        if kind == "chroma" and len(args) >= 2:
+            scene["chroma"] = max(0.0, min(1.0, float(args[1])))
+            scene["chroma_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = chroma_label(scene["chroma"])
+            return out
+        if kind.replace(".", "", 1).isdigit() and len(args) >= 2:
+            scene["density"] = max(0.0, min(1.0, float(args[0])))
+            scene["key"] = max(0.0, min(1.0, float(args[1])))
+            scene["map_active"] = True
+            if len(args) >= 3:
+                scene["chroma"] = max(0.0, min(1.0, float(args[2])))
+                scene["chroma_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = f"{density_label(scene['density'])} · {key_label(scene['key'])}"
+            return out
+    except ValueError:
+        fail("scene axes must be numbers 0..1")
+    fail("usage: ctl.py set-scene map <density> <key> | chroma <value> | map off | chroma off | off")
+
+
 def rotate(force: bool = False) -> dict:
     cfg = load_config()
     if not cfg.get("enabled") and not force:
@@ -362,7 +601,16 @@ def rotate(force: bool = False) -> dict:
     files.sort(key=lambda p: p.name)
     names = [p.name for p in background_files(slug)] or [p.name for p in files]
     enabled = enabled_names(cfg, slug, names)
-    candidates = [p for p in files if p.name in enabled]
+    scene = cfg.get("scene") or DEFAULT_SCENE
+    cache = density_cache_load()
+    candidates = []
+    for path in files:
+        if path.name not in enabled:
+            continue
+        if not scene_matches(density_for(path, cache), scene):
+            continue
+        candidates.append(path)
+    density_cache_save(cache)
     if not candidates:
         return {"ok": True, "skipped": "none-enabled"}
     current_name = current_background_name()
@@ -610,6 +858,9 @@ def main(argv: list[str]) -> None:
         if len(argv) < 3:
             fail("usage: ctl.py toggle-bg <slug> <filename>")
         dump(toggle_bg(argv[1], argv[2]))
+        return
+    if cmd == "set-scene":
+        dump(set_scene(*argv[1:]))
         return
     if cmd == "set-timer":
         enabled = None

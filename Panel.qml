@@ -39,6 +39,11 @@ Panel {
   readonly property var backgrounds: selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
   readonly property bool timerOn: !!(statusData.timer && statusData.timer.enabled)
   readonly property int intervalMinutes: (statusData.timer && statusData.timer.interval_minutes) ? statusData.timer.interval_minutes : 15
+  readonly property var scene: (statusData.timer && statusData.timer.scene) ? statusData.timer.scene : ({ map_active: false, chroma_active: false, density: 0.5, key: 0.5, chroma: 0.5, radius: 0.32 })
+  property real padDensity: 0.5
+  property real padKey: 0.5
+  property real padChroma: 0.5
+  property var pendingCtl: []
   readonly property bool busy: workProc.running
   readonly property bool syncing: busy && lastCommand === "sync"
   readonly property string heroTitle: selectedTheme.name || statusData.current_name || "Temas"
@@ -58,10 +63,41 @@ Panel {
   }
 
   function runCtl(args) {
-    if (workProc.running) return
+    if (workProc.running) {
+      pendingCtl = args
+      return
+    }
     lastCommand = args.length ? args[0] : ""
     workProc.command = ["python3", root.ctlPath].concat(args)
     workProc.running = true
+  }
+
+  function commitMap() {
+    root.runCtl(["set-scene", "map", String(root.padDensity), String(root.padKey)])
+  }
+
+  function commitChroma() {
+    root.runCtl(["set-scene", "chroma", String(root.padChroma)])
+  }
+
+  function resetMap() {
+    root.runCtl(["set-scene", "map", "off"])
+  }
+
+  function toggleChromaMenu() {
+    if (root.scene.chroma_active)
+      root.runCtl(["set-scene", "chroma", "off"])
+    else
+      root.commitChroma()
+  }
+
+  function syncPadFromStatus() {
+    var s = root.scene
+    if (!s) return
+    if (sceneDebounce.running) return
+    padDensity = s.density
+    padKey = s.key
+    padChroma = s.chroma
   }
 
   function applyStatus(raw) {
@@ -85,6 +121,7 @@ Panel {
         }
       }
       if (parsed && parsed.message) flash = parsed.message
+      root.syncPadFromStatus()
     } catch (e) {
       flash = "falha ao ler status"
     }
@@ -125,6 +162,12 @@ Panel {
     onTriggered: root.flash = ""
   }
 
+  Timer {
+    id: sceneDebounce
+    interval: 140
+    onTriggered: root.commitMap()
+  }
+
   Process {
     id: statusProc
     command: ["python3", root.ctlPath, "status"]
@@ -140,7 +183,14 @@ Panel {
       waitForEnd: true
       onStreamFinished: root.applyStatus(text)
     }
-    onExited: root.refresh()
+    onExited: {
+      root.refresh()
+      if (root.pendingCtl && root.pendingCtl.length) {
+        var next = root.pendingCtl
+        root.pendingCtl = []
+        root.runCtl(next)
+      }
+    }
   }
 
   BarIconButton {
@@ -199,30 +249,177 @@ Panel {
           }
         }
 
-        Row {
+        Flow {
           width: parent.width
           spacing: Style.space(6)
-          Repeater {
-            model: root.intervals
-            Button {
-              required property var modelData
-              text: modelData + "m"
-              selected: root.intervalMinutes === modelData
-              foreground: root.bar ? root.bar.foreground : Color.foreground
-              accent: Color.accent
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              horizontalPadding: Style.space(10)
-              onClicked: root.runCtl(["set-timer", String(modelData)])
-            }
-          }
-          Item { width: 1; height: 1; Layout.fillWidth: true }
+          Button { text: "5m"; selected: root.intervalMinutes === 5; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "5"]) }
+          Button { text: "10m"; selected: root.intervalMinutes === 10; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "10"]) }
+          Button { text: "15m"; selected: root.intervalMinutes === 15; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "15"]) }
+          Button { text: "30m"; selected: root.intervalMinutes === 30; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "30"]) }
+          Button { text: "60m"; selected: root.intervalMinutes === 60; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "60"]) }
+          Button { text: "Agora"; enabled: !root.busy; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; onClicked: root.runCtl(["next", "--force"]) }
+        }
+
+        PanelSectionHeader {
+          text: "Cena"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Flow {
+          width: parent.width
+          spacing: Style.space(6)
           Button {
-            text: "Agora"
-            enabled: !root.busy
+            text: "chroma"
+            selected: root.scene.chroma_active === true
             foreground: root.bar ? root.bar.foreground : Color.foreground
             accent: Color.accent
             fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            onClicked: root.runCtl(["next", "--force"])
+            horizontalPadding: Style.space(12)
+            onClicked: root.toggleChromaMenu()
+          }
+        }
+
+        Item {
+          id: scenePad
+          width: parent.width
+          height: Style.space(148)
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            color: Qt.rgba((root.bar ? root.bar.foreground : Color.foreground).r, (root.bar ? root.bar.foreground : Color.foreground).g, (root.bar ? root.bar.foreground : Color.foreground).b, 0.08)
+          }
+
+          Text {
+            text: "light"
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "dark"
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.margins: Style.space(6)
+            anchors.bottomMargin: Style.space(18)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "calm"
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "packed"
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+
+          Item {
+            id: plot
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(36)
+            anchors.topMargin: Style.space(10)
+            anchors.bottomMargin: Style.space(22)
+
+            Repeater {
+              model: root.backgrounds
+              Rectangle {
+                required property var modelData
+                width: modelData.active ? 8 : 6
+                height: width
+                radius: width / 2
+                color: modelData.active ? Color.accent : (root.bar ? root.bar.foreground : Color.foreground)
+                opacity: modelData.in_chroma === false ? 0.12 : (modelData.in_map === false ? 0.36 : (modelData.enabled ? 0.95 : 0.4))
+                x: Math.max(0, Math.min(plot.width - width, (modelData.density || 0) * plot.width - width / 2))
+                y: Math.max(0, Math.min(plot.height - height, (1 - (modelData.key || 0)) * plot.height - height / 2))
+              }
+            }
+
+            Rectangle {
+              id: thumb
+              width: Style.space(16)
+              height: Style.space(16)
+              radius: width / 2
+              color: Color.accent
+              border.color: root.bar ? root.bar.foreground : Color.foreground
+              border.width: 1
+              opacity: root.scene.map_active ? 1 : 0.45
+              x: Math.max(0, Math.min(plot.width - width, root.padDensity * plot.width - width / 2))
+              y: Math.max(0, Math.min(plot.height - height, (1 - root.padKey) * plot.height - height / 2))
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onDoubleClicked: root.resetMap()
+              onPressed: function(mouse) { moveTo(mouse.x, mouse.y) }
+              onPositionChanged: function(mouse) { if (pressed) moveTo(mouse.x, mouse.y) }
+              function moveTo(px, py) {
+                root.padDensity = Math.max(0, Math.min(1, px / Math.max(1, plot.width)))
+                root.padKey = Math.max(0, Math.min(1, 1 - (py / Math.max(1, plot.height))))
+                sceneDebounce.restart()
+              }
+            }
+          }
+        }
+
+        Row {
+          visible: root.scene.chroma_active === true
+          width: parent.width
+          spacing: Style.space(10)
+          height: visible ? implicitHeight : 0
+          Text {
+            text: "mute"
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+          }
+          PanelSlider {
+            id: chromaSlider
+            width: parent.width - Style.space(110)
+            bar: root.bar
+            value: root.padChroma
+            minimum: 0
+            maximum: 1
+            step: 0.02
+            onMoved: function(v) {
+              root.padChroma = v
+            }
+            onReleased: function(v) {
+              root.padChroma = v
+              root.commitChroma()
+            }
+          }
+          Text {
+            text: "vivid"
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
           }
         }
 
@@ -312,7 +509,7 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora")
+                  text: ((modelData.density_label || "") + " · " + (modelData.key_label || "") + " · " + (modelData.chroma_label || "") + " · " + (modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora")))
                   color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.45)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
