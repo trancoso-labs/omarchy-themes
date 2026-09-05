@@ -13,7 +13,6 @@ Panel {
 
   readonly property string ctlPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/3v4ng3li0n00.themes/scripts/ctl.py"
   readonly property var intervals: [5, 10, 15, 30, 60]
-  readonly property var densityFilters: ["quiet", "all", "packed"]
 
   property var statusData: ({
     ok: true,
@@ -40,7 +39,11 @@ Panel {
   readonly property var backgrounds: selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
   readonly property bool timerOn: !!(statusData.timer && statusData.timer.enabled)
   readonly property int intervalMinutes: (statusData.timer && statusData.timer.interval_minutes) ? statusData.timer.interval_minutes : 15
-  readonly property string densityFilter: (statusData.timer && statusData.timer.density) ? statusData.timer.density : "all"
+  readonly property var scene: (statusData.timer && statusData.timer.scene) ? statusData.timer.scene : ({ active: false, density: 0.5, key: 0.5, chroma: 0.5, radius: 0.32 })
+  property real padDensity: 0.5
+  property real padKey: 0.5
+  property real padChroma: 0.5
+  property var pendingCtl: []
   readonly property bool busy: workProc.running
   readonly property bool syncing: busy && lastCommand === "sync"
   readonly property string heroTitle: selectedTheme.name || statusData.current_name || "Temas"
@@ -60,10 +63,30 @@ Panel {
   }
 
   function runCtl(args) {
-    if (workProc.running) return
+    if (workProc.running) {
+      pendingCtl = args
+      return
+    }
     lastCommand = args.length ? args[0] : ""
     workProc.command = ["python3", root.ctlPath].concat(args)
     workProc.running = true
+  }
+
+  function commitScene() {
+    root.runCtl(["set-scene", String(root.padDensity), String(root.padKey), String(root.padChroma)])
+  }
+
+  function resetScene() {
+    root.runCtl(["set-scene", "off"])
+  }
+
+  function syncPadFromStatus() {
+    var s = root.scene
+    if (!s) return
+    if (sceneDebounce.running) return
+    padDensity = s.density
+    padKey = s.key
+    padChroma = s.chroma
   }
 
   function applyStatus(raw) {
@@ -87,6 +110,7 @@ Panel {
         }
       }
       if (parsed && parsed.message) flash = parsed.message
+      root.syncPadFromStatus()
     } catch (e) {
       flash = "falha ao ler status"
     }
@@ -127,6 +151,12 @@ Panel {
     onTriggered: root.flash = ""
   }
 
+  Timer {
+    id: sceneDebounce
+    interval: 140
+    onTriggered: root.commitScene()
+  }
+
   Process {
     id: statusProc
     command: ["python3", root.ctlPath, "status"]
@@ -142,7 +172,14 @@ Panel {
       waitForEnd: true
       onStreamFinished: root.applyStatus(text)
     }
-    onExited: root.refresh()
+    onExited: {
+      root.refresh()
+      if (root.pendingCtl && root.pendingCtl.length) {
+        var next = root.pendingCtl
+        root.pendingCtl = []
+        root.runCtl(next)
+      }
+    }
   }
 
   BarIconButton {
@@ -213,18 +250,151 @@ Panel {
         }
 
         PanelSectionHeader {
-          text: "Cena"
+          text: root.scene.active ? "Cena (arrasta)" : "Cena (qualquer)"
           foreground: root.bar ? root.bar.foreground : Color.foreground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
         }
 
-        Flow {
+        Item {
+          id: scenePad
           width: parent.width
-          spacing: Style.space(6)
-          Button { text: "quiet"; selected: root.densityFilter === "quiet"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "quiet"]) }
-          Button { text: "open"; selected: root.densityFilter === "open"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "open"]) }
-          Button { text: "packed"; selected: root.densityFilter === "packed"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "packed"]) }
-          Button { text: "all"; selected: root.densityFilter === "all"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "all"]) }
+          height: Style.space(148)
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            color: Qt.rgba((root.bar ? root.bar.foreground : Color.foreground).r, (root.bar ? root.bar.foreground : Color.foreground).g, (root.bar ? root.bar.foreground : Color.foreground).b, 0.08)
+          }
+
+          Text {
+            text: "light"
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "dark"
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.margins: Style.space(6)
+            anchors.bottomMargin: Style.space(18)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "calm"
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+          Text {
+            text: "packed"
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.margins: Style.space(6)
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            textFormat: Text.PlainText
+          }
+
+          Item {
+            id: plot
+            anchors.fill: parent
+            anchors.leftMargin: Style.space(10)
+            anchors.rightMargin: Style.space(36)
+            anchors.topMargin: Style.space(10)
+            anchors.bottomMargin: Style.space(22)
+
+            Repeater {
+              model: root.backgrounds
+              Rectangle {
+                required property var modelData
+                width: modelData.active ? 8 : 6
+                height: width
+                radius: width / 2
+                color: modelData.active ? Color.accent : (root.bar ? root.bar.foreground : Color.foreground)
+                opacity: modelData.in_scene === false ? 0.18 : (modelData.enabled ? 0.9 : 0.35)
+                x: Math.max(0, Math.min(plot.width - width, (modelData.density || 0) * plot.width - width / 2))
+                y: Math.max(0, Math.min(plot.height - height, (1 - (modelData.key || 0)) * plot.height - height / 2))
+              }
+            }
+
+            Rectangle {
+              id: thumb
+              width: Style.space(16)
+              height: Style.space(16)
+              radius: width / 2
+              color: Color.accent
+              border.color: root.bar ? root.bar.foreground : Color.foreground
+              border.width: 1
+              opacity: root.scene.active ? 1 : 0.45
+              x: Math.max(0, Math.min(plot.width - width, root.padDensity * plot.width - width / 2))
+              y: Math.max(0, Math.min(plot.height - height, (1 - root.padKey) * plot.height - height / 2))
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onDoubleClicked: root.resetScene()
+              onPressed: function(mouse) { moveTo(mouse.x, mouse.y) }
+              onPositionChanged: function(mouse) { if (pressed) moveTo(mouse.x, mouse.y) }
+              function moveTo(px, py) {
+                root.padDensity = Math.max(0, Math.min(1, px / Math.max(1, plot.width)))
+                root.padKey = Math.max(0, Math.min(1, 1 - (py / Math.max(1, plot.height))))
+                sceneDebounce.restart()
+              }
+            }
+          }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.space(10)
+          Text {
+            text: "mute"
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+          }
+          PanelSlider {
+            id: chromaSlider
+            width: parent.width - Style.space(110)
+            bar: root.bar
+            value: root.padChroma
+            minimum: 0
+            maximum: 1
+            step: 0.02
+            onMoved: function(v) {
+              root.padChroma = v
+              sceneDebounce.restart()
+            }
+            onReleased: function(v) {
+              root.padChroma = v
+              root.commitScene()
+            }
+          }
+          Text {
+            text: "vivid"
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+          }
         }
 
         PanelSeparator { width: parent.width }
@@ -313,7 +483,7 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: (modelData.density_label || "") + " · " + (modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora"))
+                  text: ((modelData.density_label || "") + " · " + (modelData.key_label || "") + " · " + (modelData.chroma_label || "") + " · " + (modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora")))
                   color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.45)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption

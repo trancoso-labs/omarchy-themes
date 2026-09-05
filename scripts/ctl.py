@@ -31,15 +31,22 @@ UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 FAMILY_PREFIX = "aether-"
 
+DEFAULT_SCENE = {
+    "active": False,
+    "density": 0.5,
+    "key": 0.5,
+    "chroma": 0.5,
+    "radius": 0.32,
+}
+
 DEFAULT_CONFIG = {
     "enabled": False,
     "interval_minutes": 15,
-    "density": "all",
+    "scene": json.loads(json.dumps(DEFAULT_SCENE)),
     "themes": {},
 }
 
-DENSITY_FILTERS = ("all", "quiet", "open", "packed")
-DENSITY_QUIET_MAX = 0.40
+DENSITY_CALM_MAX = 0.40
 DENSITY_PACKED_MIN = 0.70
 
 
@@ -63,7 +70,7 @@ def load_config() -> dict:
     if not isinstance(data, dict):
         return json.loads(json.dumps(DEFAULT_CONFIG))
     out = json.loads(json.dumps(DEFAULT_CONFIG))
-    out.update({k: data[k] for k in ("enabled", "interval_minutes", "density", "themes") if k in data})
+    out.update({k: data[k] for k in ("enabled", "interval_minutes", "themes") if k in data})
     if not isinstance(out.get("themes"), dict):
         out["themes"] = {}
     try:
@@ -71,8 +78,18 @@ def load_config() -> dict:
     except (TypeError, ValueError):
         out["interval_minutes"] = 15
     out["enabled"] = bool(out.get("enabled"))
-    if out.get("density") not in DENSITY_FILTERS:
-        out["density"] = "all"
+    scene = json.loads(json.dumps(DEFAULT_SCENE))
+    raw_scene = data.get("scene")
+    if isinstance(raw_scene, dict):
+        scene.update({k: raw_scene[k] for k in DEFAULT_SCENE if k in raw_scene})
+    scene["active"] = bool(scene.get("active"))
+    try:
+        scene["radius"] = max(0.08, min(1.0, float(scene.get("radius") or 0.32)))
+        for axis in ("density", "key", "chroma"):
+            scene[axis] = max(0.0, min(1.0, float(scene.get(axis) or 0.5)))
+    except (TypeError, ValueError):
+        scene = json.loads(json.dumps(DEFAULT_SCENE))
+    out["scene"] = scene
     return out
 
 
@@ -120,35 +137,72 @@ def parse_accent(colors_path: Path) -> str:
 
 
 def density_label(score: float) -> str:
-    if score < DENSITY_QUIET_MAX:
-        return "quiet"
+    if score < DENSITY_CALM_MAX:
+        return "calm"
     if score >= DENSITY_PACKED_MIN:
         return "packed"
-    return "open"
+    return "mid"
 
 
-def density_score(path: Path) -> dict:
-    """How much of the frame holds local detail.
+def key_label(score: float) -> str:
+    if score < 0.35:
+        return "dark"
+    if score >= 0.65:
+        return "light"
+    return "dusk"
 
-    Not object detection. An 8×8 box-mean of edges: a lived-in room and a
-    neon street both score packed; a red void or empty night scores quiet.
+
+def chroma_label(score: float) -> str:
+    if score < 0.22:
+        return "mute"
+    if score >= 0.45:
+        return "vivid"
+    return "tint"
+
+
+def scene_score(path: Path) -> dict:
+    """Three 0–1 axes from the same thumbnail.
+
+    density: 8×8 occupancy of edges (calm → packed)
+    key: mean luma (dark → light)
+    chroma: mean HSV saturation (mute → vivid)
     """
     from PIL import Image, ImageFilter
 
+    empty = {
+        "density": 0.0,
+        "occupancy": 0.0,
+        "key": 0.0,
+        "chroma": 0.0,
+        "density_label": "calm",
+        "key_label": "dark",
+        "chroma_label": "mute",
+        "label": "calm",
+    }
     try:
-        gray = Image.open(path).convert("L")
+        rgb = Image.open(path).convert("RGB")
     except OSError:
-        return {"density": 0.0, "occupancy": 0.0, "label": "quiet"}
-    gray.thumbnail((320, 320), Image.Resampling.LANCZOS)
+        return empty
+    rgb.thumbnail((320, 320), Image.Resampling.LANCZOS)
+    gray = rgb.convert("L")
     grid = gray.filter(ImageFilter.FIND_EDGES).resize((8, 8), Image.Resampling.BOX)
     cells = [p / 255.0 for p in grid.getdata()]
     occupancy = sum(1 for v in cells if v >= 0.04) / max(len(cells), 1)
-    mean = sum(cells) / max(len(cells), 1)
-    score = max(0.0, min(1.0, 0.7 * occupancy + 0.3 * min(mean * 8.0, 1.0)))
+    edge_mean = sum(cells) / max(len(cells), 1)
+    density = max(0.0, min(1.0, 0.7 * occupancy + 0.3 * min(edge_mean * 8.0, 1.0)))
+    luma = list(gray.getdata())
+    key = (sum(luma) / max(len(luma), 1)) / 255.0
+    sats = [p[1] for p in rgb.convert("HSV").getdata()]
+    chroma = (sum(sats) / max(len(sats), 1)) / 255.0
     return {
-        "density": round(score, 3),
+        "density": round(density, 3),
         "occupancy": round(occupancy, 3),
-        "label": density_label(score),
+        "key": round(key, 3),
+        "chroma": round(chroma, 3),
+        "density_label": density_label(density),
+        "key_label": key_label(key),
+        "chroma_label": chroma_label(chroma),
+        "label": density_label(density),
     }
 
 
@@ -175,22 +229,37 @@ def density_for(path: Path, cache: dict | None = None) -> dict:
         st = path.stat()
         key = f"{path}:{st.st_mtime_ns}:{st.st_size}"
     except OSError:
-        return {"density": 0.0, "occupancy": 0.0, "label": "quiet"}
+        return {
+            "density": 0.0,
+            "occupancy": 0.0,
+            "key": 0.0,
+            "chroma": 0.0,
+            "density_label": "calm",
+            "key_label": "dark",
+            "chroma_label": "mute",
+            "label": "calm",
+        }
     store = cache if cache is not None else density_cache_load()
     hit = store.get(key)
-    if isinstance(hit, dict) and "density" in hit:
+    if isinstance(hit, dict) and "density" in hit and "key" in hit and "chroma" in hit:
         return hit
-    scored = density_score(path)
+    scored = scene_score(path)
     store[key] = scored
     if cache is None:
         density_cache_save(store)
     return scored
 
 
-def density_matches(score: float, filt: str) -> bool:
-    if filt == "all":
+def scene_matches(axes: dict, scene: dict) -> bool:
+    if not scene.get("active"):
         return True
-    return density_label(score) == filt
+    radius = float(scene.get("radius") or 0.32)
+    dd = float(axes.get("density") or 0) - float(scene.get("density") or 0.5)
+    dk = float(axes.get("key") or 0) - float(scene.get("key") or 0.5)
+    dc = float(axes.get("chroma") or 0) - float(scene.get("chroma") or 0.5)
+    if (dd * dd + dk * dk) ** 0.5 > radius:
+        return False
+    return abs(dc) <= radius
 
 
 def parse_palette(colors_path: Path) -> list[tuple[int, int, int]]:
@@ -275,7 +344,12 @@ def status() -> dict:
                     "active": slug == current and path.name == current_bg,
                     "path": str(path),
                     "density": dens["density"],
-                    "density_label": dens["label"],
+                    "key": dens.get("key", 0),
+                    "chroma": dens.get("chroma", 0),
+                    "density_label": dens.get("density_label") or dens.get("label") or "mid",
+                    "key_label": dens.get("key_label") or "dusk",
+                    "chroma_label": dens.get("chroma_label") or "tint",
+                    "in_scene": scene_matches(dens, cfg.get("scene") or DEFAULT_SCENE),
                 }
             )
         themes.append(
@@ -306,7 +380,7 @@ def status() -> dict:
         "timer": {
             "enabled": bool(cfg.get("enabled")),
             "interval_minutes": int(cfg.get("interval_minutes") or 15),
-            "density": cfg.get("density") or "all",
+            "scene": cfg.get("scene") or json.loads(json.dumps(DEFAULT_SCENE)),
         },
         "sync": {
             "message": sync_state.get("message", ""),
@@ -421,14 +495,31 @@ def set_timer(enabled: bool | None = None, minutes: int | None = None) -> dict:
     return out
 
 
-def set_density(filt: str) -> dict:
-    if filt not in DENSITY_FILTERS:
-        fail("density must be all, quiet, or packed")
+def set_scene(*args: str) -> dict:
     cfg = load_config()
-    cfg["density"] = filt
+    scene = cfg.setdefault("scene", json.loads(json.dumps(DEFAULT_SCENE)))
+    if not args or args[0] in ("off", "reset", "all"):
+        scene["active"] = False
+        save_config(cfg)
+        out = status()
+        out["message"] = "Cena livre"
+        return out
+    if len(args) < 3:
+        fail("usage: ctl.py set-scene <density> <key> <chroma> [radius]")
+    try:
+        scene["density"] = max(0.0, min(1.0, float(args[0])))
+        scene["key"] = max(0.0, min(1.0, float(args[1])))
+        scene["chroma"] = max(0.0, min(1.0, float(args[2])))
+        if len(args) >= 4:
+            scene["radius"] = max(0.08, min(1.0, float(args[3])))
+    except ValueError:
+        fail("scene axes must be numbers 0..1")
+    scene["active"] = True
     save_config(cfg)
     out = status()
-    out["message"] = f"Cena {filt}"
+    out["message"] = (
+        f"{density_label(scene['density'])} · {key_label(scene['key'])} · {chroma_label(scene['chroma'])}"
+    )
     return out
 
 
@@ -462,13 +553,13 @@ def rotate(force: bool = False) -> dict:
     files.sort(key=lambda p: p.name)
     names = [p.name for p in background_files(slug)] or [p.name for p in files]
     enabled = enabled_names(cfg, slug, names)
-    dens_filter = cfg.get("density") or "all"
+    scene = cfg.get("scene") or DEFAULT_SCENE
     cache = density_cache_load()
     candidates = []
     for path in files:
         if path.name not in enabled:
             continue
-        if not density_matches(density_for(path, cache)["density"], dens_filter):
+        if not scene_matches(density_for(path, cache), scene):
             continue
         candidates.append(path)
     density_cache_save(cache)
@@ -720,10 +811,8 @@ def main(argv: list[str]) -> None:
             fail("usage: ctl.py toggle-bg <slug> <filename>")
         dump(toggle_bg(argv[1], argv[2]))
         return
-    if cmd == "set-density":
-        if len(argv) < 2:
-            fail("usage: ctl.py set-density all|quiet|open|packed")
-        dump(set_density(argv[1]))
+    if cmd == "set-scene":
+        dump(set_scene(*argv[1:]))
         return
     if cmd == "set-timer":
         enabled = None
