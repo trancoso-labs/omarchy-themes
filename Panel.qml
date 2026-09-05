@@ -212,47 +212,18 @@ Panel {
           Button { text: "Agora"; enabled: !root.busy; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; onClicked: root.runCtl(["next", "--force"]) }
         }
 
-        Row {
+        PanelSectionHeader {
+          text: "Cena"
+          foreground: root.bar ? root.bar.foreground : Color.foreground
+          fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Flow {
           width: parent.width
-          spacing: Style.space(8)
-
-          Text {
-            text: "Cena"
-            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
-            font.family: root.bar ? root.bar.fontFamily : Style.font.family
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            anchors.verticalCenter: parent.verticalCenter
-            textFormat: Text.PlainText
-          }
-
-          Button {
-            text: "calma"
-            selected: root.densityFilter === "quiet"
-            foreground: root.bar ? root.bar.foreground : Color.foreground
-            accent: Color.accent
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            horizontalPadding: Style.space(10)
-            onClicked: root.runCtl(["set-density", "quiet"])
-          }
-          Button {
-            text: "tudo"
-            selected: root.densityFilter === "all"
-            foreground: root.bar ? root.bar.foreground : Color.foreground
-            accent: Color.accent
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            horizontalPadding: Style.space(10)
-            onClicked: root.runCtl(["set-density", "all"])
-          }
-          Button {
-            text: "cheia"
-            selected: root.densityFilter === "packed"
-            foreground: root.bar ? root.bar.foreground : Color.foreground
-            accent: Color.accent
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            horizontalPadding: Style.space(10)
-            onClicked: root.runCtl(["set-density", "packed"])
-          }
+          spacing: Style.space(6)
+          Button { text: "calma"; selected: root.densityFilter === "quiet"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "quiet"]) }
+          Button { text: "tudo"; selected: root.densityFilter === "all"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "all"]) }
+          Button { text: "cheia"; selected: root.densityFilter === "packed"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "packed"]) }
         }
 
         PanelSeparator { width: parent.width }
