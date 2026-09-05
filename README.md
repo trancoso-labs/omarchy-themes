@@ -14,6 +14,9 @@ the same commands.
 - Lets you enable or disable each background in that theme's rotation.
 - Optional slideshow via a user systemd timer (`omarchy-theme-rotate.timer`).
   Off until you flip the switch in the panel.
+- A **density** axis, independent of palette: how much of the frame holds
+  local detail (`quiet` / `open` / `packed`). A lived-in room scores packed;
+  a red void or empty night scores quiet. The timer can filter on that.
 - **Update themes** reads Aether favorites, skips wallpapers already in a
   palette, and copies new ones into the nearest `aether-*` family theme.
 

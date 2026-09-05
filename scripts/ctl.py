@@ -34,8 +34,13 @@ FAMILY_PREFIX = "aether-"
 DEFAULT_CONFIG = {
     "enabled": False,
     "interval_minutes": 15,
+    "density": "all",
     "themes": {},
 }
+
+DENSITY_FILTERS = ("all", "quiet", "packed")
+DENSITY_QUIET_MAX = 0.40
+DENSITY_PACKED_MIN = 0.70
 
 
 def dump(obj) -> None:
@@ -58,7 +63,7 @@ def load_config() -> dict:
     if not isinstance(data, dict):
         return json.loads(json.dumps(DEFAULT_CONFIG))
     out = json.loads(json.dumps(DEFAULT_CONFIG))
-    out.update({k: data[k] for k in ("enabled", "interval_minutes", "themes") if k in data})
+    out.update({k: data[k] for k in ("enabled", "interval_minutes", "density", "themes") if k in data})
     if not isinstance(out.get("themes"), dict):
         out["themes"] = {}
     try:
@@ -66,6 +71,8 @@ def load_config() -> dict:
     except (TypeError, ValueError):
         out["interval_minutes"] = 15
     out["enabled"] = bool(out.get("enabled"))
+    if out.get("density") not in DENSITY_FILTERS:
+        out["density"] = "all"
     return out
 
 
@@ -110,6 +117,82 @@ def parse_accent(colors_path: Path) -> str:
             if match:
                 return match.group(0)
     return "#888888"
+
+
+def density_label(score: float) -> str:
+    if score < DENSITY_QUIET_MAX:
+        return "quiet"
+    if score >= DENSITY_PACKED_MIN:
+        return "packed"
+    return "open"
+
+
+def density_score(path: Path) -> dict:
+    """How much of the frame holds local detail.
+
+    Not object detection. An 8×8 box-mean of edges: a lived-in room and a
+    neon street both score packed; a red void or empty night scores quiet.
+    """
+    from PIL import Image, ImageFilter
+
+    try:
+        gray = Image.open(path).convert("L")
+    except OSError:
+        return {"density": 0.0, "occupancy": 0.0, "label": "quiet"}
+    gray.thumbnail((320, 320), Image.Resampling.LANCZOS)
+    grid = gray.filter(ImageFilter.FIND_EDGES).resize((8, 8), Image.Resampling.BOX)
+    cells = [p / 255.0 for p in grid.getdata()]
+    occupancy = sum(1 for v in cells if v >= 0.04) / max(len(cells), 1)
+    mean = sum(cells) / max(len(cells), 1)
+    score = max(0.0, min(1.0, 0.7 * occupancy + 0.3 * min(mean * 8.0, 1.0)))
+    return {
+        "density": round(score, 3),
+        "occupancy": round(occupancy, 3),
+        "label": density_label(score),
+    }
+
+
+def density_cache_load() -> dict:
+    path = STATE / "density.json"
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def density_cache_save(cache: dict) -> None:
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / "density.json.tmp"
+    tmp.write_text(json.dumps(cache) + "\n")
+    tmp.replace(STATE / "density.json")
+
+
+def density_for(path: Path, cache: dict | None = None) -> dict:
+    try:
+        st = path.stat()
+        key = f"{path}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return {"density": 0.0, "occupancy": 0.0, "label": "quiet"}
+    store = cache if cache is not None else density_cache_load()
+    hit = store.get(key)
+    if isinstance(hit, dict) and "density" in hit:
+        return hit
+    scored = density_score(path)
+    store[key] = scored
+    if cache is None:
+        density_cache_save(store)
+    return scored
+
+
+def density_matches(score: float, filt: str) -> bool:
+    if filt == "quiet":
+        return score < 0.45
+    if filt == "packed":
+        return score >= 0.60
+    return True
 
 
 def parse_palette(colors_path: Path) -> list[tuple[int, int, int]]:
@@ -176,12 +259,27 @@ def status() -> dict:
     cfg = load_config()
     current = current_theme()
     current_bg = current_background_name()
+    cache = density_cache_load()
     themes = []
     for slug in list_user_themes():
         files = background_files(slug)
         names = [p.name for p in files]
         enabled = enabled_names(cfg, slug, names)
         directory = theme_dir(slug)
+        backgrounds = []
+        for path in files:
+            dens = density_for(path, cache)
+            backgrounds.append(
+                {
+                    "file": path.name,
+                    "label": label_for(path.name),
+                    "enabled": path.name in enabled,
+                    "active": slug == current and path.name == current_bg,
+                    "path": str(path),
+                    "density": dens["density"],
+                    "density_label": dens["label"],
+                }
+            )
         themes.append(
             {
                 "id": slug,
@@ -191,18 +289,10 @@ def status() -> dict:
                 if (directory / "preview.jpg").is_file()
                 else (str(files[0]) if files else ""),
                 "current": slug == current,
-                "backgrounds": [
-                    {
-                        "file": path.name,
-                        "label": label_for(path.name),
-                        "enabled": path.name in enabled,
-                        "active": slug == current and path.name == current_bg,
-                        "path": str(path),
-                    }
-                    for path in files
-                ],
+                "backgrounds": backgrounds,
             }
         )
+    density_cache_save(cache)
     sync_state = {}
     sync_file = STATE / "sync.json"
     if sync_file.is_file():
@@ -218,6 +308,7 @@ def status() -> dict:
         "timer": {
             "enabled": bool(cfg.get("enabled")),
             "interval_minutes": int(cfg.get("interval_minutes") or 15),
+            "density": cfg.get("density") or "all",
         },
         "sync": {
             "message": sync_state.get("message", ""),
@@ -332,6 +423,17 @@ def set_timer(enabled: bool | None = None, minutes: int | None = None) -> dict:
     return out
 
 
+def set_density(filt: str) -> dict:
+    if filt not in DENSITY_FILTERS:
+        fail("density must be all, quiet, or packed")
+    cfg = load_config()
+    cfg["density"] = filt
+    save_config(cfg)
+    out = status()
+    out["message"] = f"Cena {filt}"
+    return out
+
+
 def rotate(force: bool = False) -> dict:
     cfg = load_config()
     if not cfg.get("enabled") and not force:
@@ -362,7 +464,16 @@ def rotate(force: bool = False) -> dict:
     files.sort(key=lambda p: p.name)
     names = [p.name for p in background_files(slug)] or [p.name for p in files]
     enabled = enabled_names(cfg, slug, names)
-    candidates = [p for p in files if p.name in enabled]
+    dens_filter = cfg.get("density") or "all"
+    cache = density_cache_load()
+    candidates = []
+    for path in files:
+        if path.name not in enabled:
+            continue
+        if not density_matches(density_for(path, cache)["density"], dens_filter):
+            continue
+        candidates.append(path)
+    density_cache_save(cache)
     if not candidates:
         return {"ok": True, "skipped": "none-enabled"}
     current_name = current_background_name()
@@ -610,6 +721,11 @@ def main(argv: list[str]) -> None:
         if len(argv) < 3:
             fail("usage: ctl.py toggle-bg <slug> <filename>")
         dump(toggle_bg(argv[1], argv[2]))
+        return
+    if cmd == "set-density":
+        if len(argv) < 2:
+            fail("usage: ctl.py set-density all|quiet|packed")
+        dump(set_density(argv[1]))
         return
     if cmd == "set-timer":
         enabled = None

@@ -13,6 +13,7 @@ Panel {
 
   readonly property string ctlPath: Quickshell.env("HOME") + "/.config/omarchy/plugins/3v4ng3li0n00.themes/scripts/ctl.py"
   readonly property var intervals: [5, 10, 15, 30, 60]
+  readonly property var densityFilters: ["quiet", "all", "packed"]
 
   property var statusData: ({
     ok: true,
@@ -39,6 +40,7 @@ Panel {
   readonly property var backgrounds: selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
   readonly property bool timerOn: !!(statusData.timer && statusData.timer.enabled)
   readonly property int intervalMinutes: (statusData.timer && statusData.timer.interval_minutes) ? statusData.timer.interval_minutes : 15
+  readonly property string densityFilter: (statusData.timer && statusData.timer.density) ? statusData.timer.density : "all"
   readonly property bool busy: workProc.running
   readonly property bool syncing: busy && lastCommand === "sync"
   readonly property string heroTitle: selectedTheme.name || statusData.current_name || "Temas"
@@ -226,6 +228,24 @@ Panel {
           }
         }
 
+        Row {
+          width: parent.width
+          spacing: Style.space(6)
+          Repeater {
+            model: root.densityFilters
+            Button {
+              required property var modelData
+              text: modelData
+              selected: root.densityFilter === modelData
+              foreground: root.bar ? root.bar.foreground : Color.foreground
+              accent: Color.accent
+              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+              horizontalPadding: Style.space(10)
+              onClicked: root.runCtl(["set-density", modelData])
+            }
+          }
+        }
+
         PanelSeparator { width: parent.width }
 
         PanelSectionHeader {
@@ -312,7 +332,7 @@ Panel {
 
                 Text {
                   width: parent.width
-                  text: modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora")
+                  text: (modelData.density_label || "") + " · " + (modelData.active ? "atual" : (modelData.enabled ? "no rodízio" : "fora"))
                   color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.45)
                   font.family: root.bar ? root.bar.fontFamily : Style.font.family
                   font.pixelSize: Style.font.caption
