@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "3v4ng3li0n00.themes",
+  "name": "Themes",
+  "version": "1.0.0",
+  "author": "Igor Trancoso",
+  "description": "Quick theme switcher, background rotation, and favorite sync",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Themes",
+    "description": "Switch Aether themes, pick rotation backgrounds, sync Wallhaven favorites",
+    "category": "Appearance",
+    "allowMultiple": false
+  }
+}
