@@ -201,48 +201,57 @@ Panel {
           }
         }
 
-        Row {
+        Flow {
           width: parent.width
           spacing: Style.space(6)
-          Repeater {
-            model: root.intervals
-            Button {
-              required property var modelData
-              text: modelData + "m"
-              selected: root.intervalMinutes === modelData
-              foreground: root.bar ? root.bar.foreground : Color.foreground
-              accent: Color.accent
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              horizontalPadding: Style.space(10)
-              onClicked: root.runCtl(["set-timer", String(modelData)])
-            }
-          }
-          Item { width: 1; height: 1; Layout.fillWidth: true }
-          Button {
-            text: "Agora"
-            enabled: !root.busy
-            foreground: root.bar ? root.bar.foreground : Color.foreground
-            accent: Color.accent
-            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-            onClicked: root.runCtl(["next", "--force"])
-          }
+          Button { text: "5m"; selected: root.intervalMinutes === 5; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "5"]) }
+          Button { text: "10m"; selected: root.intervalMinutes === 10; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "10"]) }
+          Button { text: "15m"; selected: root.intervalMinutes === 15; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "15"]) }
+          Button { text: "30m"; selected: root.intervalMinutes === 30; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "30"]) }
+          Button { text: "60m"; selected: root.intervalMinutes === 60; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(10); onClicked: root.runCtl(["set-timer", "60"]) }
+          Button { text: "Agora"; enabled: !root.busy; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; onClicked: root.runCtl(["next", "--force"]) }
         }
 
         Row {
           width: parent.width
-          spacing: Style.space(6)
-          Repeater {
-            model: root.densityFilters
-            Button {
-              required property var modelData
-              text: modelData
-              selected: root.densityFilter === modelData
-              foreground: root.bar ? root.bar.foreground : Color.foreground
-              accent: Color.accent
-              fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
-              horizontalPadding: Style.space(10)
-              onClicked: root.runCtl(["set-density", modelData])
-            }
+          spacing: Style.space(8)
+
+          Text {
+            text: "Cena"
+            color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
+            font.family: root.bar ? root.bar.fontFamily : Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+          }
+
+          Button {
+            text: "calma"
+            selected: root.densityFilter === "quiet"
+            foreground: root.bar ? root.bar.foreground : Color.foreground
+            accent: Color.accent
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            horizontalPadding: Style.space(10)
+            onClicked: root.runCtl(["set-density", "quiet"])
+          }
+          Button {
+            text: "tudo"
+            selected: root.densityFilter === "all"
+            foreground: root.bar ? root.bar.foreground : Color.foreground
+            accent: Color.accent
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            horizontalPadding: Style.space(10)
+            onClicked: root.runCtl(["set-density", "all"])
+          }
+          Button {
+            text: "cheia"
+            selected: root.densityFilter === "packed"
+            foreground: root.bar ? root.bar.foreground : Color.foreground
+            accent: Color.accent
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            horizontalPadding: Style.space(10)
+            onClicked: root.runCtl(["set-density", "packed"])
           }
         }
 
