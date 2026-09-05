@@ -38,7 +38,7 @@ DEFAULT_CONFIG = {
     "themes": {},
 }
 
-DENSITY_FILTERS = ("all", "quiet", "packed")
+DENSITY_FILTERS = ("all", "quiet", "open", "packed")
 DENSITY_QUIET_MAX = 0.40
 DENSITY_PACKED_MIN = 0.70
 
@@ -188,11 +188,9 @@ def density_for(path: Path, cache: dict | None = None) -> dict:
 
 
 def density_matches(score: float, filt: str) -> bool:
-    if filt == "quiet":
-        return score < 0.45
-    if filt == "packed":
-        return score >= 0.60
-    return True
+    if filt == "all":
+        return True
+    return density_label(score) == filt
 
 
 def parse_palette(colors_path: Path) -> list[tuple[int, int, int]]:
@@ -724,7 +722,7 @@ def main(argv: list[str]) -> None:
         return
     if cmd == "set-density":
         if len(argv) < 2:
-            fail("usage: ctl.py set-density all|quiet|packed")
+            fail("usage: ctl.py set-density all|quiet|open|packed")
         dump(set_density(argv[1]))
         return
     if cmd == "set-timer":

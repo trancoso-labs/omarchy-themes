@@ -221,9 +221,10 @@ Panel {
         Flow {
           width: parent.width
           spacing: Style.space(6)
-          Button { text: "calma"; selected: root.densityFilter === "quiet"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "quiet"]) }
-          Button { text: "tudo"; selected: root.densityFilter === "all"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "all"]) }
-          Button { text: "cheia"; selected: root.densityFilter === "packed"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "packed"]) }
+          Button { text: "quiet"; selected: root.densityFilter === "quiet"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "quiet"]) }
+          Button { text: "open"; selected: root.densityFilter === "open"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "open"]) }
+          Button { text: "packed"; selected: root.densityFilter === "packed"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "packed"]) }
+          Button { text: "all"; selected: root.densityFilter === "all"; foreground: root.bar ? root.bar.foreground : Color.foreground; accent: Color.accent; fontFamily: root.bar ? root.bar.fontFamily : Style.font.family; horizontalPadding: Style.space(12); onClicked: root.runCtl(["set-density", "all"]) }
         }
 
         PanelSeparator { width: parent.width }
