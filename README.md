@@ -16,9 +16,10 @@ the same commands.
   Off until you flip the switch in the panel.
 - Three 0–1 scene axes, independent of palette:
   **density** (`calm` / `mid` / `packed`), **key** (`dark` / `dusk` / `light`),
-  **chroma** (`mute` / `tint` / `vivid`). Drag the pad (density × key) and the
-  chroma slider; double-click the pad to clear the filter. The timer only
-  rotates wallpapers near that point.
+  **chroma** (`mute` / `tint` / `vivid`). Open **chroma** above the pad to
+  pre-filter mute→vivid; the map then dims anything outside that band and
+  keeps points near the dragged cursor. Double-click the pad to clear only
+  the map. The timer rotates the surviving set.
 - **Update themes** reads Aether favorites, skips wallpapers already in a
   palette, and copies new ones into the nearest `aether-*` family theme.
 

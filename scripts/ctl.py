@@ -32,7 +32,8 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
 FAMILY_PREFIX = "aether-"
 
 DEFAULT_SCENE = {
-    "active": False,
+    "map_active": False,
+    "chroma_active": False,
     "density": 0.5,
     "key": 0.5,
     "chroma": 0.5,
@@ -82,7 +83,11 @@ def load_config() -> dict:
     raw_scene = data.get("scene")
     if isinstance(raw_scene, dict):
         scene.update({k: raw_scene[k] for k in DEFAULT_SCENE if k in raw_scene})
-    scene["active"] = bool(scene.get("active"))
+        if "map_active" not in raw_scene and raw_scene.get("active"):
+            scene["map_active"] = True
+            scene["chroma_active"] = True
+    scene["map_active"] = bool(scene.get("map_active"))
+    scene["chroma_active"] = bool(scene.get("chroma_active"))
     try:
         scene["radius"] = max(0.08, min(1.0, float(scene.get("radius") or 0.32)))
         for axis in ("density", "key", "chroma"):
@@ -250,16 +255,30 @@ def density_for(path: Path, cache: dict | None = None) -> dict:
     return scored
 
 
-def scene_matches(axes: dict, scene: dict) -> bool:
-    if not scene.get("active"):
+def scene_radius(scene: dict) -> float:
+    try:
+        return max(0.08, min(1.0, float(scene.get("radius") or 0.32)))
+    except (TypeError, ValueError):
+        return 0.32
+
+
+def in_chroma(axes: dict, scene: dict) -> bool:
+    if not scene.get("chroma_active"):
         return True
-    radius = float(scene.get("radius") or 0.32)
+    dc = float(axes.get("chroma") or 0) - float(scene.get("chroma") or 0.5)
+    return abs(dc) <= scene_radius(scene)
+
+
+def in_map(axes: dict, scene: dict) -> bool:
+    if not scene.get("map_active"):
+        return True
     dd = float(axes.get("density") or 0) - float(scene.get("density") or 0.5)
     dk = float(axes.get("key") or 0) - float(scene.get("key") or 0.5)
-    dc = float(axes.get("chroma") or 0) - float(scene.get("chroma") or 0.5)
-    if (dd * dd + dk * dk) ** 0.5 > radius:
-        return False
-    return abs(dc) <= radius
+    return (dd * dd + dk * dk) ** 0.5 <= scene_radius(scene)
+
+
+def scene_matches(axes: dict, scene: dict) -> bool:
+    return in_chroma(axes, scene) and in_map(axes, scene)
 
 
 def parse_palette(colors_path: Path) -> list[tuple[int, int, int]]:
@@ -349,6 +368,8 @@ def status() -> dict:
                     "density_label": dens.get("density_label") or dens.get("label") or "mid",
                     "key_label": dens.get("key_label") or "dusk",
                     "chroma_label": dens.get("chroma_label") or "tint",
+                    "in_chroma": in_chroma(dens, cfg.get("scene") or DEFAULT_SCENE),
+                    "in_map": in_map(dens, cfg.get("scene") or DEFAULT_SCENE),
                     "in_scene": scene_matches(dens, cfg.get("scene") or DEFAULT_SCENE),
                 }
             )
@@ -499,28 +520,55 @@ def set_scene(*args: str) -> dict:
     cfg = load_config()
     scene = cfg.setdefault("scene", json.loads(json.dumps(DEFAULT_SCENE)))
     if not args or args[0] in ("off", "reset", "all"):
-        scene["active"] = False
+        scene["map_active"] = False
+        scene["chroma_active"] = False
         save_config(cfg)
         out = status()
         out["message"] = "Cena livre"
         return out
-    if len(args) < 3:
-        fail("usage: ctl.py set-scene <density> <key> <chroma> [radius]")
+    kind = args[0]
     try:
-        scene["density"] = max(0.0, min(1.0, float(args[0])))
-        scene["key"] = max(0.0, min(1.0, float(args[1])))
-        scene["chroma"] = max(0.0, min(1.0, float(args[2])))
-        if len(args) >= 4:
-            scene["radius"] = max(0.08, min(1.0, float(args[3])))
+        if kind == "map" and len(args) >= 2 and args[1] in ("off", "reset"):
+            scene["map_active"] = False
+            save_config(cfg)
+            out = status()
+            out["message"] = "Mapa livre"
+            return out
+        if kind == "chroma" and len(args) >= 2 and args[1] in ("off", "reset"):
+            scene["chroma_active"] = False
+            save_config(cfg)
+            out = status()
+            out["message"] = "Chroma livre"
+            return out
+        if kind == "map" and len(args) >= 3:
+            scene["density"] = max(0.0, min(1.0, float(args[1])))
+            scene["key"] = max(0.0, min(1.0, float(args[2])))
+            scene["map_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = f"{density_label(scene['density'])} · {key_label(scene['key'])}"
+            return out
+        if kind == "chroma" and len(args) >= 2:
+            scene["chroma"] = max(0.0, min(1.0, float(args[1])))
+            scene["chroma_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = chroma_label(scene["chroma"])
+            return out
+        if kind.replace(".", "", 1).isdigit() and len(args) >= 2:
+            scene["density"] = max(0.0, min(1.0, float(args[0])))
+            scene["key"] = max(0.0, min(1.0, float(args[1])))
+            scene["map_active"] = True
+            if len(args) >= 3:
+                scene["chroma"] = max(0.0, min(1.0, float(args[2])))
+                scene["chroma_active"] = True
+            save_config(cfg)
+            out = status()
+            out["message"] = f"{density_label(scene['density'])} · {key_label(scene['key'])}"
+            return out
     except ValueError:
         fail("scene axes must be numbers 0..1")
-    scene["active"] = True
-    save_config(cfg)
-    out = status()
-    out["message"] = (
-        f"{density_label(scene['density'])} · {key_label(scene['key'])} · {chroma_label(scene['chroma'])}"
-    )
-    return out
+    fail("usage: ctl.py set-scene map <density> <key> | chroma <value> | map off | chroma off | off")
 
 
 def rotate(force: bool = False) -> dict:

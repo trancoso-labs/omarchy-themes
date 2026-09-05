@@ -39,7 +39,7 @@ Panel {
   readonly property var backgrounds: selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
   readonly property bool timerOn: !!(statusData.timer && statusData.timer.enabled)
   readonly property int intervalMinutes: (statusData.timer && statusData.timer.interval_minutes) ? statusData.timer.interval_minutes : 15
-  readonly property var scene: (statusData.timer && statusData.timer.scene) ? statusData.timer.scene : ({ active: false, density: 0.5, key: 0.5, chroma: 0.5, radius: 0.32 })
+  readonly property var scene: (statusData.timer && statusData.timer.scene) ? statusData.timer.scene : ({ map_active: false, chroma_active: false, density: 0.5, key: 0.5, chroma: 0.5, radius: 0.32 })
   property real padDensity: 0.5
   property real padKey: 0.5
   property real padChroma: 0.5
@@ -72,12 +72,23 @@ Panel {
     workProc.running = true
   }
 
-  function commitScene() {
-    root.runCtl(["set-scene", String(root.padDensity), String(root.padKey), String(root.padChroma)])
+  function commitMap() {
+    root.runCtl(["set-scene", "map", String(root.padDensity), String(root.padKey)])
   }
 
-  function resetScene() {
-    root.runCtl(["set-scene", "off"])
+  function commitChroma() {
+    root.runCtl(["set-scene", "chroma", String(root.padChroma)])
+  }
+
+  function resetMap() {
+    root.runCtl(["set-scene", "map", "off"])
+  }
+
+  function toggleChromaMenu() {
+    if (root.scene.chroma_active)
+      root.runCtl(["set-scene", "chroma", "off"])
+    else
+      root.commitChroma()
   }
 
   function syncPadFromStatus() {
@@ -154,7 +165,7 @@ Panel {
   Timer {
     id: sceneDebounce
     interval: 140
-    onTriggered: root.commitScene()
+    onTriggered: root.commitMap()
   }
 
   Process {
@@ -250,9 +261,23 @@ Panel {
         }
 
         PanelSectionHeader {
-          text: root.scene.active ? "Cena (arrasta)" : "Cena (qualquer)"
+          text: "Cena"
           foreground: root.bar ? root.bar.foreground : Color.foreground
           fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+        }
+
+        Flow {
+          width: parent.width
+          spacing: Style.space(6)
+          Button {
+            text: "chroma"
+            selected: root.scene.chroma_active === true
+            foreground: root.bar ? root.bar.foreground : Color.foreground
+            accent: Color.accent
+            fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+            horizontalPadding: Style.space(12)
+            onClicked: root.toggleChromaMenu()
+          }
         }
 
         Item {
@@ -324,7 +349,7 @@ Panel {
                 height: width
                 radius: width / 2
                 color: modelData.active ? Color.accent : (root.bar ? root.bar.foreground : Color.foreground)
-                opacity: modelData.in_scene === false ? 0.18 : (modelData.enabled ? 0.9 : 0.35)
+                opacity: modelData.in_chroma === false ? 0.12 : (modelData.in_map === false ? 0.36 : (modelData.enabled ? 0.95 : 0.4))
                 x: Math.max(0, Math.min(plot.width - width, (modelData.density || 0) * plot.width - width / 2))
                 y: Math.max(0, Math.min(plot.height - height, (1 - (modelData.key || 0)) * plot.height - height / 2))
               }
@@ -338,7 +363,7 @@ Panel {
               color: Color.accent
               border.color: root.bar ? root.bar.foreground : Color.foreground
               border.width: 1
-              opacity: root.scene.active ? 1 : 0.45
+              opacity: root.scene.map_active ? 1 : 0.45
               x: Math.max(0, Math.min(plot.width - width, root.padDensity * plot.width - width / 2))
               y: Math.max(0, Math.min(plot.height - height, (1 - root.padKey) * plot.height - height / 2))
             }
@@ -347,7 +372,7 @@ Panel {
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
-              onDoubleClicked: root.resetScene()
+              onDoubleClicked: root.resetMap()
               onPressed: function(mouse) { moveTo(mouse.x, mouse.y) }
               onPositionChanged: function(mouse) { if (pressed) moveTo(mouse.x, mouse.y) }
               function moveTo(px, py) {
@@ -360,8 +385,10 @@ Panel {
         }
 
         Row {
+          visible: root.scene.chroma_active === true
           width: parent.width
           spacing: Style.space(10)
+          height: visible ? implicitHeight : 0
           Text {
             text: "mute"
             color: Qt.darker(root.bar ? root.bar.foreground : Color.foreground, 1.4)
@@ -380,11 +407,10 @@ Panel {
             step: 0.02
             onMoved: function(v) {
               root.padChroma = v
-              sceneDebounce.restart()
             }
             onReleased: function(v) {
               root.padChroma = v
-              root.commitScene()
+              root.commitChroma()
             }
           }
           Text {
