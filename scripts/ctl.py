@@ -130,15 +130,26 @@ def theme_dir(slug: str) -> Path:
     return Path()
 
 
-def parse_accent(colors_path: Path) -> str:
+def parse_theme_colors(colors_path: Path) -> dict:
+    vals = {"accent": "#888888", "foreground": "#EEEEEE", "background": "#111111"}
     if not colors_path.is_file():
-        return "#888888"
+        return vals
     for line in colors_path.read_text().splitlines():
-        if line.strip().startswith("accent"):
-            match = re.search(r"#[0-9A-Fa-f]{6}", line)
-            if match:
-                return match.group(0)
-    return "#888888"
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, rest = stripped.partition("=")
+        key = key.strip()
+        if key not in vals:
+            continue
+        match = re.search(r"#[0-9A-Fa-f]{6}", rest)
+        if match:
+            vals[key] = match.group(0)
+    return vals
+
+
+def parse_accent(colors_path: Path) -> str:
+    return parse_theme_colors(colors_path)["accent"]
 
 
 def density_label(score: float) -> str:
@@ -352,6 +363,7 @@ def status() -> dict:
         names = [p.name for p in files]
         enabled = enabled_names(cfg, slug, names)
         directory = theme_dir(slug)
+        palette = parse_theme_colors(directory / "colors.toml")
         backgrounds = []
         for path in files:
             dens = density_for(path, cache)
@@ -377,7 +389,9 @@ def status() -> dict:
             {
                 "id": slug,
                 "name": display_name(slug),
-                "accent": parse_accent(directory / "colors.toml"),
+                "accent": palette["accent"],
+                "foreground": palette["foreground"],
+                "background": palette["background"],
                 "preview": str(directory / "preview.jpg")
                 if (directory / "preview.jpg").is_file()
                 else (str(files[0]) if files else ""),
@@ -419,6 +433,22 @@ def run_omarchy(*args: str) -> subprocess.CompletedProcess:
         text=True,
         check=False,
     )
+
+
+def set_bg(slug: str, filename: str) -> dict:
+    path = next((p for p in background_files(slug) if p.name == filename), None)
+    if path is None:
+        fail(f"background not in {slug}: {filename}")
+    if current_theme() != slug:
+        applied = run_omarchy("theme", "set", slug)
+        if applied.returncode != 0:
+            fail(applied.stderr.strip() or applied.stdout.strip() or f"theme set failed: {slug}")
+    result = run_omarchy("theme", "bg", "set", str(path))
+    if result.returncode != 0:
+        fail(result.stderr.strip() or "bg set failed")
+    out = status()
+    out["message"] = label_for(filename)
+    return out
 
 
 def set_theme(slug: str) -> dict:
@@ -853,6 +883,11 @@ def main(argv: list[str]) -> None:
         if len(argv) < 2:
             fail("usage: ctl.py set-theme <slug>")
         dump(set_theme(argv[1]))
+        return
+    if cmd == "set-bg":
+        if len(argv) < 3:
+            fail("usage: ctl.py set-bg <slug> <filename>")
+        dump(set_bg(argv[1], argv[2]))
         return
     if cmd == "toggle-bg":
         if len(argv) < 3:

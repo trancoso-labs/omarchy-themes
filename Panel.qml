@@ -444,8 +444,10 @@ Panel {
               text: modelData.name.replace("Aether ", "")
               selected: root.selectedId === modelData.id
               active: modelData.current === true
-              foreground: root.bar ? root.bar.foreground : Color.foreground
+              bordered: true
+              foreground: modelData.foreground || (root.bar ? root.bar.foreground : Color.foreground)
               accent: modelData.accent || Color.accent
+              background: modelData.background || "transparent"
               fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
               leftAlign: true
               onClicked: root.selectTheme(modelData.id)
@@ -474,21 +476,33 @@ Panel {
             required property var modelData
             width: bgList.width
             height: Style.space(52)
+            opacity: modelData.in_scene === false ? 0.28 : (modelData.enabled ? 1 : 0.45)
 
             Row {
               anchors.fill: parent
               spacing: Style.space(10)
 
-              Image {
+              Item {
                 width: Style.space(72)
                 height: Style.space(44)
                 anchors.verticalCenter: parent.verticalCenter
-                source: modelData.path ? ("file://" + modelData.path) : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                sourceSize.width: 144
-                sourceSize.height: 88
+
+                Image {
+                  anchors.fill: parent
+                  source: modelData.path ? ("file://" + modelData.path) : ""
+                  fillMode: Image.PreserveAspectCrop
+                  asynchronous: true
+                  cache: true
+                  sourceSize.width: 144
+                  sourceSize.height: 88
+                  opacity: modelData.active ? 1 : 0.95
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.runCtl(["set-bg", root.selectedTheme.id, modelData.file])
+                }
               }
 
               Column {
