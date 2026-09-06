@@ -36,7 +36,22 @@ Panel {
       if (list[j].current) return list[j]
     return list.length ? list[0] : ({ id: "", name: "", backgrounds: [] })
   }
-  readonly property var backgrounds: selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
+  readonly property var backgrounds: {
+    var src = selectedTheme && selectedTheme.backgrounds ? selectedTheme.backgrounds : []
+    var copy = []
+    for (var i = 0; i < src.length; i++)
+      copy.push(src[i])
+    copy.sort(function(a, b) {
+      var aOn = a.in_scene !== false ? 0 : 1
+      var bOn = b.in_scene !== false ? 0 : 1
+      if (aOn !== bOn)
+        return aOn - bOn
+      if (!!a.active !== !!b.active)
+        return a.active ? -1 : 1
+      return 0
+    })
+    return copy
+  }
   readonly property bool timerOn: !!(statusData.timer && statusData.timer.enabled)
   readonly property int intervalMinutes: (statusData.timer && statusData.timer.interval_minutes) ? statusData.timer.interval_minutes : 15
   readonly property var scene: (statusData.timer && statusData.timer.scene) ? statusData.timer.scene : ({ map_active: false, chroma_active: false, density: 0.5, key: 0.5, chroma: 0.5, radius: 0.32 })
